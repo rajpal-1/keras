@@ -52,6 +52,8 @@ def save_model(model, filepath, overwrite=True, **kwargs):
     """
     include_optimizer = kwargs.pop("include_optimizer", True)
     save_format = kwargs.pop("save_format", False)
+    sharded = kwargs.pop("sharded", False)
+    shard_size = kwargs.pop("shard_size", None)
     if save_format:
         if str(filepath).endswith((".h5", ".hdf5")) or str(filepath).endswith(
             ".keras"
@@ -97,7 +99,12 @@ def save_model(model, filepath, overwrite=True, **kwargs):
             return
 
     if str(filepath).endswith(".keras"):
-        saving_lib.save_model(model, filepath)
+        saving_lib.save_model(
+            model,
+            filepath,
+            sharded=sharded,
+            shard_size=shard_size,
+        )
     elif str(filepath).endswith((".h5", ".hdf5")):
         legacy_h5_format.save_model_to_hdf5(
             model, filepath, overwrite, include_optimizer
@@ -204,17 +211,18 @@ def load_model(filepath, custom_objects=None, compile=True, safe_mode=True):
 
 
 def load_weights(model, filepath, skip_mismatch=False, **kwargs):
+    sharded = kwargs.pop("sharded", False)
     if str(filepath).endswith(".keras"):
         if kwargs:
             raise ValueError(f"Invalid keyword arguments: {kwargs}")
         saving_lib.load_weights_only(
-            model, filepath, skip_mismatch=skip_mismatch
+            model, filepath, sharded=sharded, skip_mismatch=skip_mismatch
         )
     elif str(filepath).endswith(".weights.h5"):
         if kwargs:
             raise ValueError(f"Invalid keyword arguments: {kwargs}")
         saving_lib.load_weights_only(
-            model, filepath, skip_mismatch=skip_mismatch
+            model, filepath, sharded=sharded, skip_mismatch=skip_mismatch
         )
     elif str(filepath).endswith(".h5") or str(filepath).endswith(".hdf5"):
         by_name = kwargs.pop("by_name", False)
