@@ -1,5 +1,7 @@
 import pickle
+import sys
 
+import cloudpickle
 import numpy as np
 import pytest
 from absl.testing import parameterized
@@ -11,6 +13,7 @@ from keras.src.layers.core.input_layer import Input
 from keras.src.models.functional import Functional
 from keras.src.models.model import Model
 from keras.src.models.model import model_from_json
+from keras.src.saving.object_registration import register_keras_serializable
 
 
 def _get_model():
@@ -66,6 +69,17 @@ def _get_model_multi_outputs_dict():
     output_b = layers.Dense(1, name="output_b", activation="sigmoid")(x)
     model = Model(x, {"output_a": output_a, "output_b": output_b})
     return model
+
+
+@pytest.fixture
+def fake_main_module(request, monkeypatch):
+    original_main = sys.modules["__main__"]
+
+    def restore_main_module():
+        sys.modules["__main__"] = original_main
+
+    request.addfinalizer(restore_main_module)
+    sys.modules["__main__"] = sys.modules[__name__]
 
 
 @pytest.mark.requires_trainable_backend
@@ -135,6 +149,45 @@ class ModelTest(testing.TestCase, parameterized.TestCase):
         x = np.random.rand(8, 3)
 
         reloaded_pickle = pickle.loads(pickle.dumps(model))
+
+        pred_reloaded = reloaded_pickle.predict(x)
+        pred = model.predict(x)
+
+        self.assertAllClose(np.array(pred_reloaded), np.array(pred))
+
+    # Fake the __main__ module because cloudpickle only serializes
+    # functions & classes if they are defined in the __main__ module.
+    @pytest.mark.usefixtures("fake_main_module")
+    def test_functional_pickling_custom_layer(self):
+        @register_keras_serializable()
+        class CustomDense(layers.Layer):
+            def __init__(self, units, **kwargs):
+                super().__init__(**kwargs)
+                self.units = units
+                self.dense = layers.Dense(units)
+
+            def call(self, x):
+                return self.dense(x)
+
+            def get_config(self):
+                config = super().get_config()
+                config.update({"units": self.units})
+                return config
+
+        x = Input(shape=(3,), name="input_a")
+        output_a = CustomDense(10, name="output_a")(x)
+        model = Model(x, output_a)
+
+        self.assertIsInstance(model, Functional)
+        model.compile()
+        x = np.random.rand(8, 3)
+
+        dumped_pickle = cloudpickle.dumps(model)
+
+        # Verify that we can load the dumped pickle even if the custom object
+        # is not available in the loading environment.
+        del CustomDense
+        reloaded_pickle = cloudpickle.loads(dumped_pickle)
 
         pred_reloaded = reloaded_pickle.predict(x)
         pred = model.predict(x)
